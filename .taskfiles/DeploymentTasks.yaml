@@ -1,0 +1,11 @@
+version: '3'
+
+tasks:
+  prereq:
+    desc: Checks to make sure prereqs are installed
+
+    preconditions:
+      - sh: '[[ -z "$AWS_REGION" ]]'
+      - sh: 'echo $AWS_REGION'
+        msg: |
+          The SED_CMD var was set to {{.SED_CMD}}.  This does not appear to be set in the path.  Please update or replace the SED_CMD to the cmd or alias that references GNU-SED.  If you do not have GNU-SED, this is required for this TaskFile to run

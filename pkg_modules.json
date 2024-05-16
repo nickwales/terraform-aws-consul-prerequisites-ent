@@ -1,0 +1,56 @@
+{
+  "ext_modules": [
+    {
+      "name": "acm",
+      "caller": "modules/ingress/main.tf",
+      "source": "./modules/acm"
+    },
+    {
+      "name": "vpc",
+      "caller": "modules/networking/main.tf",
+      "source": "./modules/vpc"
+    },
+    {
+      "name": "vpc_endpoints",
+      "caller": "modules/networking/main.tf",
+      "source": "./modules/vpc_endpoints"
+    }
+  ],
+  "prereq": [
+    {
+      "name": "iam",
+      "caller": "main.tf",
+      "source": "./modules/iam"
+    },
+    {
+      "name": "ingress",
+      "caller": "main.tf",
+      "source": "./modules/ingress"
+    },
+    {
+      "name": "kms",
+      "caller": "main.tf",
+      "source": "./modules/kms"
+    },
+    {
+      "name": "networking",
+      "caller": "main.tf",
+      "source": "./modules/networking"
+    },
+    {
+      "name": "s3",
+      "caller": "main.tf",
+      "source": "./modules/s3"
+    },
+    {
+      "name": "secrets_manager",
+      "caller": "main.tf",
+      "source": "./modules/secrets_manager"
+    },
+    {
+      "name": "sg",
+      "caller": "main.tf",
+      "source": "./modules/sg"
+    }
+  ]
+}

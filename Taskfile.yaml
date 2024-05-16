@@ -1,0 +1,172 @@
+version: '3'
+
+vars:
+  PRODUCT: consul
+  ACL_INIT_DIR: supplemental-modules/consul-acl-init/
+  CERT_GEN_DIR: supplemental-modules/generate-self-signed/
+  SED_CMD: '{{ if eq OS "darwin" }}gsed{{ else }}sed{{ end }}'
+
+
+# includes:
+#   consul: .taskfiles/DeploymentTasks.yaml
+
+tasks:
+  default:
+    desc: Creates a packaged bundle of the HashiCorp Enterprise installer for {{.PRODUCT}} on AWS
+    alias: [run]
+    platforms: [linux, darwin]
+    cmds:
+      - task: prereqs
+      - task: generate-consul-certs
+      - task: deploy-consul-prereqs
+      - task: deploy-consul-server
+      - task: template-consul-init
+
+
+  prereqs:
+    desc: Checks to see if the required environment variables are set via the task file or not
+    preconditions:
+      - sh: test -n "$AWS_REGION"
+        msg: $AWS_REGION must be specified. Please run `export AWS_REGION="<your-region>" in your shell for this deployment
+      - sh: command -v {{.SED_CMD}}
+        msg: |
+          The SED_CMD var was set to {{.SED_CMD}}.  This does not appear to be set in the path.  Please update or replace the SED_CMD to the cmd or alias that references GNU-SED.  If you do not have GNU-SED, this is required for this TaskFile to run
+      - sh: command -v jq
+        msg: |
+          It appears that `jq` is not installed.  Please install with your package manager
+      - sh: command -v terraform
+        msg: |
+          Terraform executable isn't present within the path. Please install with your package manager
+      - sh: command -v aws
+        msg: |
+          AWS CLI isn't present. Please install AWS CLI with your package manager.
+
+  generate-consul-certs:
+    desc: "Generates self signed certificates for Consul"
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+    - |
+      cd {{.CERT_GEN_DIR}}
+      echo "Running Terraform Init"
+      terraform init > /dev/null
+      terraform apply
+    status:
+      - test -f consul-agent-ca.pem
+      - test -f consul-server-private.pem
+      - test -f consul-server-public.pem
+
+  deploy-consul-prereqs:
+    desc: "Creates the pre-reqs for the Consul enviornment"
+    deps: [prereqs]
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+    - echo "Running Terraform init"
+    - terraform init > /dev/null
+    - terraform apply -auto-approve
+    silent: false
+
+  deploy-consul-server:
+    desc: "Creates the initial policies and tokens inside of Consul via the secrets created within AWS"
+    deps: [prereqs]
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - |
+        {{.SED_CMD}} -i '/^# module "consul" {/,/^# }$/ s/^# //' main.tf > /dev/null
+      - echo "Running Terraform Init"
+      - terraform init > /dev/null
+      - terraform apply -auto-approve
+      - |
+        TF_VAR_consul_secrets_arn=$(terraform output -raw consul_secrets_arn)
+        AWS_REGION=$(echo $TF_VAR_consul_secrets_arn | awk -F: '{print $4}')
+        TF_VAR_consul_url=$(terraform output -raw route53_failover_fqdn):8501
+        TF_VAR_consul_token=$(aws secretsmanager get-secret-value --secret-id $TF_VAR_consul_secrets_arn --region $AWS_REGION | jq -r .SecretString | jq .acl_token.data | {{.SED_CMD}} 's/"//g')
+
+        max_retries=30
+        retry_interval=10
+        retry_count=0
+
+        while [ $retry_count -lt $max_retries ]; do
+            if curl -ksfS --connect-timeout $retry_interval -o /dev/null "https://$TF_VAR_consul_url/v1/catalog/service/consul" -H "X-Consul-Token: $TF_VAR_consul_token"; then
+                echo
+                echo
+                echo "Consul service is healthy."
+                echo "Consul URL: https://$TF_VAR_consul_url/ui"
+                break
+            else
+                echo
+                echo
+                echo "Service check failed. Retrying in $retry_interval seconds..."
+                sleep $retry_interval
+                retry_count=$((retry_count + 1))
+            fi
+        done
+
+        if [ $retry_count -eq $max_retries ]; then
+            echo "Service check failed after $max_retries retries. Exiting."
+        fi
+    silent: true
+
+  template-consul-init:
+    desc: "Creates the initial policies and tokens inside of Consul via the secrets created within AWS"
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+    - |
+      export TF_VAR_consul_secrets_arn=$(terraform output -raw consul_secrets_arn)
+      export TF_VAR_consul_url=$(terraform output -raw route53_failover_fqdn):8501
+      export AWS_REGION=$(echo $TF_VAR_consul_secrets_arn | awk -F: '{print $4}')
+      export TF_VAR_consul_token=$(aws secretsmanager get-secret-value --secret-id $TF_VAR_consul_secrets_arn --region $AWS_REGION | jq -r .SecretString | jq .acl_token.data | {{.SED_CMD}} 's/"//g')
+      cd {{.ACL_INIT_DIR}}
+      echo $TF_VAR_consul_secrets_arn
+      echo $TF_VAR_consul_url
+      echo $TF_VAR_consul_token
+      terraform init > /dev/null
+      terraform apply -auto-approve
+    silent: true
+
+  consul-acl-force-remove:
+    desc: "Deletes the state file for the ACLs if the environment was destroyed"
+    dir: '{{.ACL_INIT_DIR}}'
+    cmds:
+    - rm -rf terraform.tfstate
+
+  print-acl-token:
+    desc: "Prints the initial management token to login to the UI"
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+    - |
+      consul_secrets_arn=$(terraform output -raw consul_secrets_arn)
+      AWS_REGION=$(echo $consul_secrets_arn | awk -F: '{print $4}')
+      aws secretsmanager get-secret-value --secret-id $consul_secrets_arn --region $AWS_REGION | jq -r .SecretString | jq .acl_token.data | {{.SED_CMD}} 's/"//g'
+    silent: true
+
+  cleanup:
+    desc: "Destroys the environment and comments the files to their original state"
+    deps: [prereqs]
+    dir: "{{.USER_WORKING_DIR}}"
+    cmds:
+    - echo "Cleaning up example deployment"
+    - |
+      export TF_VAR_consul_secrets_arn=$(terraform output -raw consul_secrets_arn)
+      export TF_VAR_consul_url=$(terraform output -raw route53_failover_fqdn):8501
+      export AWS_REGION=$(echo $TF_VAR_consul_secrets_arn | awk -F: '{print $4}')
+      export TF_VAR_consul_token=$(aws secretsmanager get-secret-value --secret-id $TF_VAR_consul_secrets_arn --region $AWS_REGION | jq -r .SecretString | jq .acl_token.data | {{.SED_CMD}} 's/"//g')
+      cd {{.ACL_INIT_DIR}}
+      terraform destroy --auto-approve
+    - cd "{{.USER_WORKING_DIR}}"
+    - terraform destroy --auto-approve
+    - echo "Commenting the testing modules"
+    - |
+      {{ .SED_CMD }} -i '/^module "consul" {/,/^}$/ s/^\([^#]\)/# \1/' main.tf > /dev/null
+    silent: false
+
+  bulk-cleanup:
+    desc: "Cleans up and comments the module calls for publishing"
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - |
+        TF_VAR_consul_secrets_arn=$(terraform output -raw consul_secrets_arn)
+        TF_VAR_consul_url=$(terraform output -raw route53_failover_fqdn):8501
+        AWS_REGION=$(echo $TF_VAR_consul_secrets_arn | awk -F: '{print $4}')
+        TF_VAR_consul_token=$(aws secretsmanager get-secret-value --secret-id $TF_VAR_consul_secrets_arn --region $AWS_REGION | jq -r .SecretString | jq .acl_token.data | {{.SED_CMD}} 's/"//g')
+        cd {{.ACL_INIT_DIR}}
+        terraform destroy -auto-approve

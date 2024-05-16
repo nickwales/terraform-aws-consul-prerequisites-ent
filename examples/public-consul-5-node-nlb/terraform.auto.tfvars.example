@@ -1,0 +1,259 @@
+#------------------------------------------------------------------------------
+# General
+#------------------------------------------------------------------------------
+friendly_name_prefix = "hashicat"
+
+common_tags = {
+  deployment = "consul"
+  site       = "westeros"
+}
+
+
+# Commented to ensure people are prompted if they don't set this
+# region =
+
+#------------------------------------------------------------------------------
+# Secrets Manager Configuration
+#------------------------------------------------------------------------------
+secretsmanager_secrets = {
+  consul = {
+    license = {
+      name = "consul-license"
+      data = "YOUR LICENSE HERE"
+    }
+    acl_token = {
+      generate = true
+    }
+    agent_token = {
+      generate = true
+    }
+    gossip_key = {
+      generate = true
+    }
+    snapshot_token = {
+      generate = true
+    }
+    ingress_gw_token = {
+      generate    = true
+    }
+    terminating_gw_token = {
+      generate    = true
+    }
+    mesh_gw_token = {
+      generate = true
+    }
+  }
+  ca_certificate_bundle = {
+    name = "consul-ca-bundle"
+    path = "./consul-agent-ca.pem"
+  }
+  cert_pem_secret = {
+    name = "consul-public"
+    path = "./consul-server-public.pem"
+  }
+  cert_pem_private_key_secret = {
+    name = "consul-private"
+    path = "./consul-server-private.pem"
+  }
+}
+
+#------------------------------------------------------------------------------
+# S3 Configuration
+#------------------------------------------------------------------------------
+s3_buckets = {
+  snapshot = {
+    bucket_name   = "consul-westeros-snapshots"
+    force_destroy = true
+  }
+}
+
+
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCX/57xBO3ZBhWFnHXcO0+DOKyrajTWyvOlxFHUQ/PlH9iNqog4XIWkYlG/3f0ctl61IR0InrH2PRYYctlR4HIeMWO2cbJcC8PovWlaB9nHU3rb16JWsx47C48R6iurTxyvYHkeYPbjYlicqztwMbvdh55jw+vOTZCM85Ni+burz1dxSTYh164rsB2WzRL+G/c74D5L6ufOnY6k9VTlf9VGpZ6Zh72xmm9IKyHwO6t518Ht5QZdQtBPKEjbGMByLSHPBsw1ceq1P+r315YfH7rYR11DnDNDpkrf87RB5nC9TiukMlz53MtW6vdPzThB/XlupqWDjwdlQGmU9BnGMu+jz0eWtUIQkaTANQXxtQAgv/YvuAq2QuRsd/lRLwR49fRbUXy3VRThYVu25oZsvPgknsY4ZarTYh1d65C2qrVVvoEYdnx4w+rBQWWludOhvcwfz5edpvxIoUh9ksdWog1kMlr8fFUCQepCPUF8ObM69sXjJv9sdM3GpGiGtUinda8="
+#------------------------------------------------------------------------------
+# IAM Configuration
+#------------------------------------------------------------------------------
+iam_resources = {
+  ssm_enable              = true
+  cloud_auto_join_enabled = true
+  log_forwarding_enabled  = true
+  role_name               = "deployment-role"
+  policy_name             = "deployment-policy"
+  ssm_enable              = true
+}
+
+#------------------------------------------------------------------------------
+# Network Configuration
+#------------------------------------------------------------------------------
+route53_failover_record = {
+  record_name = "consul"
+}
+
+route53_zone_name = "hashicat.aws.sbx.hashicorpdemo.com"
+
+security_group_rules = {
+  consul = {
+    server = {
+      rpc = {
+        enabled   = true
+        self      = true
+        target_sg = "agent"
+      }
+      serf_lan_tcp = {
+        enabled   = true
+        self      = true
+        target_sg = "agent"
+      }
+      serf_lan_udp = {
+        enabled   = true
+        self      = true
+        target_sg = "agent"
+      }
+      dns_tcp = {
+        enabled    = true
+        self       = true
+        bidrection = true
+      }
+      dns_udp = {
+        enabled    = true
+        self       = true
+        bidrection = true
+      }
+      https_api = {
+        enabled    = true
+        self       = true
+        bidrection = false
+        cidr_blocks = ["0.0.0.0/0"]
+      }
+      grpc = {
+        enabled    = true
+        self       = true
+        bidrection = false
+      }
+      grpc_tls = {
+        enabled    = true
+        self       = true
+        bidrection = false
+      }
+    }
+    agent = {
+      rpc = {
+        enabled = true
+        self    = true
+      }
+      serf_lan_tcp = {
+        enabled = true
+        self    = true
+      }
+      serf_lan_udp = {
+        enabled = true
+        self    = true
+      }
+      dns_tcp = {
+        enabled       = true
+        self          = true
+        bidirectional = true
+      }
+      dns_udp = {
+        enabled       = true
+        self          = true
+        bidirectional = true
+      }
+      serf_lan_udp = {
+        enabled = true
+        self    = true
+      }
+    }
+    gateway = {
+      mesh_gateway ={
+        enabled       = true
+        from_port     = 8443
+        to_port       = 8443
+        self          = true
+        cidr_blocks   = ["0.0.0.0/0"]
+      }
+      ingress_gateway ={
+        enabled       = true
+        from_port     = 8080
+        to_port       = 8080
+        self          = true
+        cidr_blocks   = ["0.0.0.0/0"]
+      }
+    }
+  }
+}
+
+lb_internal = false
+
+lb_target_groups = {
+  consul_dns = {
+    create = false
+    health_check = {
+      enabled = false
+    }
+  }
+  consul_api_tls = {
+    create = true
+    health_check = {
+      enabled = true
+    }
+  }
+}
+
+route53_resolver_pool = {
+  enabled = false
+}
+
+lb_listener_details = {
+  consul_dns = {
+    create = false
+  }
+  consul_api_tls = {
+    create = true
+  }
+}
+
+#------------------------------------------------------------------------------
+# Consul Server Configuration
+#------------------------------------------------------------------------------
+
+consul_server_agent = {
+  auto_reload_config = true
+  server             = true
+  ui                 = true
+  join_environment   = "primary"
+}
+consul_server_cluster_version  = "0.0.1"
+consul_server_environment_name = "primary"
+
+snapshot_agent = {
+  enabled   = true
+  interval  = "30m"
+  retention = 0
+}
+
+
+#------------------------------------------------------------------------------
+# Consul Agent Configuration
+#------------------------------------------------------------------------------
+consul_agent = {
+  auto_reload_config = true
+  server             = false
+  ui                 = false
+  join_environment   = "primary"
+}
+
+consul_agent_environment_name = "agent-primary"
+consul_agent_cluster_version = "0.0.1"
+
+#------------------------------------------------------------------------------
+# Consul Gateway Configuration
+#------------------------------------------------------------------------------
+consul_gateway_environment_name = "gateway-primary"
+consul_gateway_cluster_version = "0.0.1"
+
+ingress_gateway = {
+  enabled         = true
+  container_image = "envoyproxy/envoy:v1.25.4"
+  service_name    = "ingress-gateway"
+  ingress_cidrs   = ["0.0.0.0/0"]
+}
